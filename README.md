@@ -95,6 +95,8 @@ python tools/check_fips_cipher.py data/nspktdump.pcap --strict
 
 ## Output
 
+<img width="1101" height="954" alt="image" src="https://github.com/user-attachments/assets/39b8745c-d9b9-4845-9598-2b432bcc4aeb" />
+
 For each handshake the tool prints:
 - ClientHello offered cipher suites tagged `[FIPS OK]` or `[NON-FIPS]`
 - ServerHello selected cipher suite with the same tagging
