@@ -1,0 +1,32 @@
+{
+    "chat.tools.terminal.autoApprove": {
+        "/^python -c \"\nfrom pdfminer\\.high_level import extract_text\ntext = extract_text\\(r'c:\\\\mycode\\\\fips_test\\\\doc\\\\CDTBA-NPLAN-4241 NS Client FIPS Mode Support Test Plan\\.pdf'\\)\nprint\\(text\\)\n\"$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^python -c \"import os; print\\(os\\.path\\.getsize\\(r'c:\\\\mycode\\\\fips_test\\\\data\\\\nspktdump\\.pcap'\\), 'bytes'\\)\"$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^python -c \"import importlib\\.util; \\[print\\(m\\) for m in \\['scapy','dpkt','pyshark'\\] if importlib\\.util\\.find_spec\\(m\\)\\]\"$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^python -c \"\nwith open\\(r'c:\\\\mycode\\\\fips_test\\\\data\\\\nspktdump\\.pcap','rb'\\) as f:\n    magic = f\\.read\\(4\\)\n    print\\('Magic:', magic\\.hex\\(\\)\\)\n    if magic == b'\\\\xd4\\\\xc3\\\\xb2\\\\xa1': print\\('Format: pcap \\(little-endian\\)'\\)\n    elif magic == b'\\\\xa1\\\\xb2\\\\xc3\\\\xd4': print\\('Format: pcap \\(big-endian\\)'\\)\n    elif magic == b'\\\\x0a\\\\x0d\\\\x0d\\\\x0a': print\\('Format: pcapng'\\)\n    else: print\\('Format: unknown'\\)\n\"$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^python -c \"\nimport os, struct\npath = r'c:\\\\mycode\\\\fips_test\\\\data\\\\nspktdump\\.pcap'\nsize = os\\.path\\.getsize\\(path\\)\nwith open\\(path,'rb'\\) as f:\n    magic = f\\.read\\(4\\)\n    ver_major, ver_minor, tz, sigfigs, snaplen, network = struct\\.unpack\\('<HHiIII', f\\.read\\(20\\)\\)\n    print\\(f'Size: \\{size\\} bytes'\\)\n    print\\(f'Magic: \\{magic\\.hex\\(\\)\\}'\\)\n    print\\(f'Version: \\{ver_major\\}\\.\\{ver_minor\\}'\\)\n    print\\(f'Snaplen: \\{snaplen\\}, Link-type: \\{network\\}'\\)\n    # Count packets\n    count = 0\n    while True:\n        hdr = f\\.read\\(16\\)\n        if len\\(hdr\\) < 16: break\n        ts_sec, ts_usec, incl_len, orig_len = struct\\.unpack\\('<IIII', hdr\\)\n        data = f\\.read\\(incl_len\\)\n        if len\\(data\\) < incl_len: break\n        count \\+= 1\n    print\\(f'Packet count: \\{count\\}'\\)\n\"$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^python -c \"\nimport struct\n\npath = r'c:\\\\mycode\\\\fips_test\\\\data\\\\nspktdump\\.pcap'\n# Check how many TCP payloads start with TLS handshake type byte directly \\(no record header\\)\n# and also check multi-record packets\nwith open\\(path,'rb'\\) as f:\n    f\\.read\\(24\\)\n    pkt_num = 0\n    hs_at_record_start = 0  # TLS record with handshake\n    ch_direct = 0\n    sh_direct = 0\n    sport_dport = \\{\\}\n    while True:\n        hdr = f\\.read\\(16\\)\n        if len\\(hdr\\) < 16: break\n        ts_sec, ts_usec, incl_len, orig_len = struct\\.unpack\\('<IIII', hdr\\)\n        data = f\\.read\\(incl_len\\)\n        if len\\(data\\) < incl_len: break\n        pkt_num \\+= 1\n        if len\\(data\\) < 1: continue\n        ip_ver = \\(data\\[0\\] >> 4\\)\n        if ip_ver != 4: continue\n        ihl = \\(data\\[0\\] & 0x0F\\) \\* 4\n        proto = data\\[9\\]\n        if proto != 6: continue\n        tcp_start = ihl\n        if tcp_start \\+ 20 > len\\(data\\): continue\n        src_port = struct\\.unpack\\('!H', data\\[tcp_start:tcp_start\\+2\\]\\)\\[0\\]\n        dst_port = struct\\.unpack\\('!H', data\\[tcp_start\\+2:tcp_start\\+4\\]\\)\\[0\\]\n        tcp_data_offset = \\(\\(data\\[tcp_start \\+ 12\\] >> 4\\) \\* 4\\)\n        payload = data\\[tcp_start \\+ tcp_data_offset:\\]\n        if len\\(payload\\) < 6: continue\n        ct = payload\\[0\\]\n        if ct == 22:\n            hs_at_record_start \\+= 1\n            hs_type = payload\\[5\\]\n            if hs_type == 1:\n                ch_direct \\+= 1\n            elif hs_type == 2:\n                sh_direct \\+= 1\n                key = \\(src_port, dst_port\\)\n\n    print\\(f'Packets with TLS Handshake record: \\{hs_at_record_start\\}'\\)\n    print\\(f'ClientHellos \\(at record start\\): \\{ch_direct\\}'\\)\n    print\\(f'ServerHellos \\(at record start\\): \\{sh_direct\\}'\\)\n\"$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^python tools/check_fips_cipher\\.py data/nspktdump\\.pcap 2>&1 \\| Select-Object -First 120$/": {
+            "approve": true,
+            "matchCommandLine": true
+        }
+    }
+}

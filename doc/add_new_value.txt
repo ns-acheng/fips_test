@@ -1,0 +1,134 @@
+
+
+
+
+======================================================================
+NEW TEST AREA E:  Per-Module TLS Version Constraints (Design §4.4.4)
+======================================================================
+
+The design specifies that tlspipe and AppProbStatsComm support TLS 1.2 only,
+while nsHttpClient and nssl support both TLS 1.2 and 1.3. These module-specific
+constraints need targeted validation.
+
+Test
+ID    Type        Pri  Description                                                                     Platform
+---   ----        ---  -----------                                                                     --------
+76    Functional  P0   tlspipe TLS 1.2 Only (Strict): With FipsMode=1, verify NPA tunnel (tlspipe)     Win x64 /
+                       negotiates only TLS 1.2 with FIPS-approved cipher suites (e.g.,                macOS
+                       TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384). Confirm TLS 1.3 is not used.
+
+77    Functional  P0   AppProbStatsComm TLS 1.2 Only (Strict): With FipsMode=1, verify P-DEM           Win x64 /
+                       probing (AppProbStatsComm) uses TLS 1.2 with FIPS-approved suites only.        macOS
+
+78    Functional  P0   nsHttpClient TLS Version Negotiation (Strict): With FipsMode=1, verify          Win x64 /
+                       nsHttpClient (nsDownloader, addonman, secure configure, longpoll) negotiates    macOS
+                       TLS 1.2 or TLS 1.3 depending on server support, always with FIPS suites.
+
+79    Functional  P0   nssl TLS Version Negotiation (Strict): With FipsMode=1, verify SWG tunnel       Win x64 /
+                       (nssl) negotiates TLS 1.2 or 1.3 with FIPS suites only.                        macOS
+
+80    Functional  P1   Module-Specific Cipher List Isolation: Verify each module's cipher list is       Win x64 /
+                       configured independently and a configuration error in one module does not       macOS
+                       affect others.
+
+
+
+
+======================================================================
+NEW TEST AREA H:  Algorithm-Level Validation (Design Appendix 2)
+======================================================================
+
+The design details exactly which algorithms are available in the FIPS provider vs
+default provider. Tests should verify algorithm availability/blocking.
+
+Test
+ID    Type        Pri  Description                                                                     Platform
+---   ----        ---  -----------                                                                     --------
+87    Functional  P0   FIPS-Approved Symmetric Ciphers Available: With FipsMode=1, verify that          Win x64 /
+                       AES-CBC, AES-GCM, AES-CTR, AES-CCM, AES-XTS, AES-WRAP operations              macOS
+                       succeed via the FIPS provider.
+
+88    Negative    P0   Non-FIPS Symmetric Ciphers Blocked: With FipsMode=1, attempt DES,                Win x64 /
+                       RC4, RC2, IDEA, CAST, ChaCha20 operations. Verify all are rejected             macOS
+                       by the FIPS provider with clear error.
+
+89    Functional  P0   FIPS-Approved Hash Functions: With FipsMode=1, verify SHA-1, SHA-2               Win x64 /
+                       (224/256/384/512), SHA-3 (224/256/384/512), SHAKE128/256 operations             macOS
+                       succeed.
+
+90    Negative    P0   Non-FIPS Hash Functions Blocked: With FipsMode=1, attempt MD5, MD2,              Win x64 /
+                       MD4, RIPEMD160, SM3, Whirlpool. Verify all are rejected.                       macOS
+
+91    Functional  P0   FIPS-Approved Asymmetric Keys: With FipsMode=1, verify RSA, ECDSA               Win x64 /
+                       (P-256/P-384/P-521), DH, DSA operations succeed.                               macOS
+
+92    Negative    P1   Non-FIPS Asymmetric Algorithms Blocked: With FipsMode=1, attempt                 Win x64 /
+                       Ed25519, Ed448, X25519, X448, SM2 operations. Verify rejected.                 macOS
+
+93    Functional  P0   FIPS-Approved MACs: With FipsMode=1, verify HMAC (SHA-1/2/3),                   Win x64 /
+                       CMAC (AES), GMAC (AES) operations succeed.                                     macOS
+
+94    Negative    P1   Non-FIPS MACs Blocked: With FipsMode=1, attempt Poly1305, SipHash.              Win x64 /
+                       Verify rejected.                                                                macOS
+
+95    Functional  P1   FIPS-Approved KDFs: With FipsMode=1, verify PBKDF2, HKDF, TLS1-PRF,            Win x64 /
+                       X963KDF, SSKDF, KBKDF, SSHKDF, TLS1.3-KDF succeed.                            macOS
+
+96    Functional  P1   3DES Availability Check: Design shows 3DES in FIPS provider column.             Win x64 /
+                       Verify whether 3DES is available in provider 3.1.2 and document                macOS
+                       behavior. (Note: 3DES is deprecated in FIPS 140-3; may be restricted.)
+
+
+======================================================================
+NEW TEST AREA J:  Dual-Process Partial-Failure Scenarios (Design §4.3.6)
+======================================================================
+
+The design explicitly calls out that Agent and Service initialize FIPS independently.
+Edge cases where one succeeds and the other fails need dedicated coverage.
+
+Test
+ID    Type        Pri  Description                                                                     Platform
+---   ----        ---  -----------                                                                     --------
+101   Functional  P0   Agent FIPS OK, Service FIPS Fails (Strict): Corrupt the FIPS provider only      Win x64 /
+                       for the Service process (e.g., via file lock timing or separate config).        macOS
+                       Verify entire client enters disabled state per Strict policy.
+
+102   Functional  P0   Agent FIPS Fails, Service FIPS OK (Strict): Reverse of 101. Verify entire       Win x64 /
+                       client enters disabled state.                                                   macOS
+
+103   Functional  P1   Agent FIPS OK, Service FIPS Fails (Permissive): Verify both processes fall      Win x64 /
+                       back to Non-FIPS Mode (no partial/mixed compliance state).                      macOS
+
+104   Functional  P1   Agent FIPS Fails, Service FIPS OK (Permissive): Verify both fall back to        Win x64 /
+                       Non-FIPS consistently, not a mixed state.                                       macOS
+
+105   Observability P1 Split-Process Log Correlation: Verify logs from Agent and Service can be        Win x64 /
+                       correlated (by timestamp and process ID) to reconstruct the unified             macOS
+                       FIPS enablement outcome for audit.
+
+
+
+
+======================================================================
+NEW TEST AREA O:  macOS Architecture-Specific (Design §Appendix 1)
+======================================================================
+
+macOS supports both Intel (x86_64) and Apple Silicon (arm64). The FIPS provider
+may behave differently across architectures.
+
+Test
+ID    Type        Pri  Description                                                                     Platform
+---   ----        ---  -----------                                                                     --------
+121   Functional  P0   macOS Intel – Strict FIPS Mode: On Intel-based Mac, install with FipsMode=1.    macOS Intel
+                       Verify FIPS provider loads, POSTs pass, TLS uses FIPS suites.
+
+122   Functional  P0   macOS Apple Silicon – Strict FIPS Mode: On Apple Silicon Mac (native, not       macOS ARM
+                       Rosetta), install with FipsMode=1. Verify same.
+
+123   Functional  P1   macOS Rosetta Compatibility: On Apple Silicon running under Rosetta              macOS ARM
+                       translation, verify FIPS provider behavior (load, self-test, operation)        (Rosetta)
+                       matches expected behavior per the provider's Security Policy.
+
+124   Negative    P1   Architecture Mismatch – Wrong Binary: Ship an x86_64 fips.dylib on              macOS ARM
+                       Apple Silicon (no Rosetta). Verify clean failure and informative error.
+
