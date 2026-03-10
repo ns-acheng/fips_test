@@ -68,7 +68,6 @@ You can also run the checker module directly:
 
 ```bash
 python tools/check_fips_cipher.py data/nspktdump.pcap
-python tools/check_fips_cipher.py data/nspktdump.pcap --strict
 ```
 
 ## FIPS-Approved Cipher Suites
