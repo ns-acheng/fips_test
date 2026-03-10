@@ -544,7 +544,7 @@ def check_and_report(results, strict=False):
             if ch_non_fips:
                 if strict:
                     verdict = "FAIL"
-                    issues.append(f"ClientHello offers {len(ch_non_fips)} non-FIPS cipher(s) (--strict)")
+                    issues.append(f"ClientHello offers {len(ch_non_fips)} non-FIPS cipher(s)")
                 else:
                     warnings += 1
                     issues.append(f"WARN: ClientHello offers {len(ch_non_fips)} non-FIPS cipher(s)")
