@@ -614,12 +614,10 @@ def check_and_report(results, strict=False, pid_filter=None):
         pid_label = ""
         if ch_pid is not None:
             pid_label = f"  [CH-PID={ch_pid}]"
-        print(f"\n=== Handshake #{d['index']}  (pkt {sh['pkt_num']}, "
-              f"{sh['src_ip']}:{sh['src_port']} -> {sh['dst_ip']}:{sh['dst_port']})"
-              f"{pid_label} ===")
+        print(f"\n======= Handshake #{d['index']}  "
+              f"(pkt {sh['pkt_num']}){pid_label} ===============")
         if sni:
             print(f"  SNI: {_yellow(sni)}")
-        print(f"  TLS Version (ServerHello): {d['sh_ver_name']}")
 
         # ClientHello
         if ch:
