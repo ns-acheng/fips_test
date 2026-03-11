@@ -101,54 +101,7 @@ Cipher suite naming format (TLS 1.2 style):
 
 Example: `TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256`
 
-### TLS 1.2
-
-| Code | Name |
-|------|------|
-| `0xC02F` | TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256 |
-| `0xC030` | TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384 |
-| `0xC02B` | TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256 |
-| `0xC02C` | TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384 |
-| `0x009E` | TLS_DHE_RSA_WITH_AES_128_GCM_SHA256 |
-| `0x009F` | TLS_DHE_RSA_WITH_AES_256_GCM_SHA384 |
-
-### TLS 1.3
-
-| Code | Name |
-|------|------|
-| `0x1301` | TLS_AES_128_GCM_SHA256 |
-| `0x1302` | TLS_AES_256_GCM_SHA384 |
-
-> `TLS_CHACHA20_POLY1305_SHA256` (`0x1303`) is explicitly excluded — the OpenSSL FIPS provider does not include it.
 
 ## Output
 
 <img width="1101" height="954" alt="image" src="https://github.com/user-attachments/assets/39b8745c-d9b9-4845-9598-2b432bcc4aeb" />
-
-For each handshake the tool prints:
-- PID labels (when input is ETL): `[CH-PID=13256, SH-PID=0]`
-- ClientHello offered cipher suites tagged `[FIPS OK]` or `[NON-FIPS]`
-- ServerHello selected cipher suite with the same tagging
-- Per-handshake verdict: `PASS` or `FAIL`
-
-The summary section shows:
-- Total / pass / fail counts
-- All non-FIPS cipher suites seen with offered/selected counts
-- Overall `PASS` or `FAIL`
-
-Exit code is `0` on PASS, `1` on FAIL.
-
-## Project Structure
-
-```
-main.py                        # Entry point
-tools/
-    __init__.py
-    check_fips_cipher.py       # Core TLS parsing and FIPS verification
-data/
-    nspktdump.pcap             # Sample pcap capture
-doc/
-    design_doc_text.txt        # FIPS design document reference
-    test_plan_text.txt         # Test plan
-    add_new_value.txt          # Test plan addendum
-```
