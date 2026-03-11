@@ -21,6 +21,7 @@ import os
 import struct
 import sys
 from collections import defaultdict
+from pathlib import Path
 
 # ---------------------------------------------------------------------------
 # ANSI color helpers
@@ -94,6 +95,56 @@ def is_fips_ok(code):
 def is_signaling(code):
     """Check if a cipher suite code is a signaling/GREASE value (not a real cipher)."""
     return code in SIGNALING_SUITES or code in GREASE_VALUES
+
+
+# ---------------------------------------------------------------------------
+# ETL PID extraction
+# ---------------------------------------------------------------------------
+
+_ETL_PACKET_PROVIDER = '2ed6006e-4729-4609-b423-3ee7bcd678ef'
+
+
+def extract_pids_from_etl(etl_path):
+    """Extract per-packet PID map from an ETL file.
+
+    Uses the etl-parser library to read events natively in Python.
+    Returns a dict mapping 1-based packet index to ProcessId.
+    """
+    from etl.etl import build_from_stream, IEtlFileObserver
+
+    class _PidCollector(IEtlFileObserver):
+        def __init__(self):
+            self.events = []  # (timestamp, pid)
+
+        def on_event_record(self, event):
+            try:
+                prov = event.source.event_header.provider_id.inner
+                d4 = bytes(prov.data4)
+                guid = (f"{prov.data1:08x}-{prov.data2:04x}-{prov.data3:04x}"
+                        f"-{d4[:2].hex()}-{d4[2:].hex()}")
+            except (AttributeError, KeyError):
+                return
+            if guid == _ETL_PACKET_PROVIDER:
+                self.events.append((event.get_timestamp(),
+                                    event.get_process_id()))
+
+        def on_perfinfo_trace(self, e): pass
+        def on_system_trace(self, e): pass
+        def on_trace_record(self, e): pass
+        def on_win_trace(self, e): pass
+
+    try:
+        with open(etl_path, "rb") as fh:
+            data = fh.read()
+        etl_file = build_from_stream(data)
+        collector = _PidCollector()
+        etl_file.parse(collector)
+        # Sort by timestamp to match PCAP packet order (etl2pcapng sorts the same way)
+        collector.events.sort(key=lambda x: x[0])
+        return {i: pid for i, (_, pid) in enumerate(collector.events, 1)}
+    except Exception as exc:
+        print(f"WARNING: ETL PID extraction failed: {exc}", file=sys.stderr)
+        return {}
 
 
 # ---------------------------------------------------------------------------
@@ -263,7 +314,8 @@ def _extract_ip_data(pkt_data, link_type):
     return None
 
 
-def _process_packet(pkt_data, link_type, pkt_num, client_hellos, results):
+def _process_packet(pkt_data, link_type, pkt_num, client_hellos, results,
+                    pid_map=None):
     """Process one packet: extract TLS ClientHello/ServerHello if present."""
     ip_data = _extract_ip_data(pkt_data, link_type)
     if ip_data is None or len(ip_data) < 20:
@@ -319,6 +371,8 @@ def _process_packet(pkt_data, link_type, pkt_num, client_hellos, results):
             ch["src_port"] = src_port
             ch["dst_ip"] = dst_ip
             ch["dst_port"] = dst_port
+            if pid_map:
+                ch["pid"] = pid_map.get(pkt_num)
             client_hellos[flow_key] = ch
 
     elif hs_type == 2:  # ServerHello
@@ -329,6 +383,8 @@ def _process_packet(pkt_data, link_type, pkt_num, client_hellos, results):
             sh["src_port"] = src_port
             sh["dst_ip"] = dst_ip
             sh["dst_port"] = dst_port
+            if pid_map:
+                sh["pid"] = pid_map.get(pkt_num)
             ch = client_hellos.get(rev_key)
             results.append({
                 "client_hello": ch,
@@ -424,10 +480,13 @@ def _read_pcapng(filedata):
 # unified entry point
 # ---------------------------------------------------------------------------
 
-def process_pcap(filepath):
+def process_pcap(filepath, pid_map=None):
     """
     Read a pcap or pcapng file, extract TLS ClientHello/ServerHello from
     each packet, return a list of handshake result dicts.
+
+    If *pid_map* is provided (dict mapping 1-based pkt index to PID),
+    each ClientHello / ServerHello dict will include a ``pid`` key.
     """
     with open(filepath, "rb") as f:
         filedata = f.read()
@@ -448,12 +507,16 @@ def process_pcap(filepath):
               file=sys.stderr)
         sys.exit(1)
 
-    print(f"Format: {fmt}")
+    if pid_map:
+        print(f"Format: {fmt}  (PID map: {len(pid_map)} packets)")
+    else:
+        print(f"Format: {fmt}")
     results = []
     client_hellos = {}
 
     for pkt_num, pkt_bytes, link_type in reader:
-        _process_packet(pkt_bytes, link_type, pkt_num, client_hellos, results)
+        _process_packet(pkt_bytes, link_type, pkt_num, client_hellos, results,
+                        pid_map=pid_map)
 
     return results
 
@@ -462,12 +525,15 @@ def process_pcap(filepath):
 # FIPS compliance check + report
 # ---------------------------------------------------------------------------
 
-def check_and_report(results, strict=False):
+def check_and_report(results, strict=False, pid_filter=None):
     """
     Analyze each handshake for FIPS compliance and print report.
     Returns 0 if all pass, 1 if any fail.
+
+    If *pid_filter* is given (set of ints), only handshakes whose
+    ClientHello **or** ServerHello was sent by one of those PIDs
+    are included in the report.
     """
-    total = len(results)
     passed = 0
     failed = 0
     warnings = 0
@@ -477,6 +543,14 @@ def check_and_report(results, strict=False):
     for idx, hs in enumerate(results, 1):
         ch = hs["client_hello"]
         sh = hs["server_hello"]
+
+        # ---- PID filter ----
+        if pid_filter is not None:
+            ch_pid = ch.get("pid") if ch else None
+            sh_pid = sh.get("pid") if sh else None
+            if ch_pid not in pid_filter and sh_pid not in pid_filter:
+                continue
+
         verdict = "PASS"
         issues = []
 
@@ -537,8 +611,19 @@ def check_and_report(results, strict=False):
         ch = d["ch"]
         sni = ch.get("sni") if ch else None
         sni_str = f"  SNI: {sni}" if sni else ""
+        sh_pid = sh.get("pid")
+        ch_pid = ch.get("pid") if ch else None
+        pid_label = ""
+        if sh_pid is not None or ch_pid is not None:
+            parts = []
+            if ch_pid is not None:
+                parts.append(f"CH-PID={ch_pid}")
+            if sh_pid is not None:
+                parts.append(f"SH-PID={sh_pid}")
+            pid_label = f"  [{', '.join(parts)}]"
         print(f"\n=== Handshake #{d['index']}  (pkt {sh['pkt_num']}, "
-              f"{sh['src_ip']}:{sh['src_port']} -> {sh['dst_ip']}:{sh['dst_port']}) ===")
+              f"{sh['src_ip']}:{sh['src_port']} -> {sh['dst_ip']}:{sh['dst_port']})"
+              f"{pid_label} ===")
         if sni:
             print(f"  SNI: {_yellow(sni)}")
         print(f"  TLS Version (ServerHello): {d['sh_ver_name']}")
@@ -580,7 +665,7 @@ def check_and_report(results, strict=False):
     print("\n" + "=" * 60)
     print("SUMMARY")
     print("=" * 60)
-    print(f"Total handshakes analyzed: {total}")
+    print(f"Total handshakes analyzed: {passed + failed}")
     print(f"  {_green('PASS')}: {passed}")
     print(f"  {_red('FAIL')}: {failed}")
     if warnings:

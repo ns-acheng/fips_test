@@ -18,7 +18,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-from tools.check_fips_cipher import process_pcap, check_and_report, FIPS_ALLOWED_CIPHERS
+from tools.check_fips_cipher import (process_pcap, check_and_report,
+                                     FIPS_ALLOWED_CIPHERS, extract_pids_from_etl)
 
 MODE_NAMES = {0: "Non-FIPS", 1: "Strict FIPS", 2: "Permissive FIPS"}
 
@@ -87,9 +88,43 @@ def main():
         default=1,
         help="FipsMode: 0=Non-FIPS (skip), 1=Strict, 2=Permissive (default: 1)",
     )
+    parser.add_argument(
+        "--pid",
+        type=str,
+        default=None,
+        help=(
+            "Comma-separated list of process IDs to filter output. "
+            "Only handshakes involving these PIDs are shown. "
+            "Requires .etl input (PID info is extracted from the ETL)."
+        ),
+    )
     args = parser.parse_args()
 
     resolved_capture = _resolve_input_capture_path(args.pcap)
+
+    # --- PID extraction & filter ---
+    pid_map = {}
+    pid_filter = None
+    etl_path = Path(args.pcap)
+    if etl_path.suffix.lower() == ".etl" and etl_path.exists():
+        print(f"Extracting per-packet PIDs from ETL: {etl_path}")
+        pid_map = extract_pids_from_etl(str(etl_path))
+        print(f"  PID map: {len(pid_map)} packets mapped")
+    elif args.pid:
+        print(
+            "WARNING: --pid filter requested but input is not .etl; "
+            "PID information is unavailable.",
+            file=sys.stderr,
+        )
+
+    if args.pid:
+        try:
+            pid_filter = {int(p.strip()) for p in args.pid.split(",")}
+        except ValueError:
+            print("ERROR: --pid must be a comma-separated list of integers.",
+                  file=sys.stderr)
+            sys.exit(1)
+        print(f"PID filter: {pid_filter}")
 
     mode_name = MODE_NAMES[args.mode]
     print(f"Pcap:  {resolved_capture}")
@@ -102,12 +137,12 @@ def main():
 
     strict = args.mode == 1
 
-    results = process_pcap(resolved_capture)
+    results = process_pcap(resolved_capture, pid_map=pid_map or None)
     if not results:
         print("\nNo TLS handshakes (ClientHello/ServerHello pairs) found.")
         sys.exit(0)
 
-    rc = check_and_report(results, strict=strict)
+    rc = check_and_report(results, strict=strict, pid_filter=pid_filter)
     sys.exit(rc)
 
 

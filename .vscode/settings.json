@@ -27,6 +27,22 @@
         "/^python tools/check_fips_cipher\\.py data/nspktdump\\.pcap 2>&1 \\| Select-Object -First 120$/": {
             "approve": true,
             "matchCommandLine": true
+        },
+        "/^python parse_etl_csv\\.py$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^python parse_etl_direct\\.py 2>&1 \\| Select-Object -First 300$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^python parse_etl_network_events\\.py$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^Get-WinEvent -Path data/ao\\.etl -Oldest -MaxEvents 5000 \\| Group-Object ProviderId \\| Select-Object Name, Count \\| Sort-Object Count -Descending$/": {
+            "approve": true,
+            "matchCommandLine": true
         }
     }
 }

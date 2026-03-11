@@ -5,7 +5,7 @@ Parses a pcap file and verifies that every TLS 1.2/1.3 handshake (ClientHello & 
 ## Requirements
 
 - Python 3.8+
-- Dependencies listed in `requirements.txt`
+- Dependencies listed in `requirements.txt` (`dpkt`, `etl-parser`)
 - **Windows OS** for `.etl` input conversion (`etl2pcapng.exe` is Windows-only)
 
 Install dependencies:
@@ -26,6 +26,7 @@ python main.py <pcap_file> --mode=<0|1|2>
 |----------|-------------|
 | `pcap_file` | Path to capture file (`.pcap`, `.pcapng`, or `.etl`) |
 | `--mode` | FipsMode (default: `1`) |
+| `--pid` | Comma-separated list of PIDs to filter (ETL input only) |
 
 ### ETL Input (Windows only)
 
@@ -39,6 +40,25 @@ Converter lookup order:
 2. `tools/win/etl2pcapng.exe`
 
 > Note: ETL conversion is **Windows-only**.
+
+### PID Filtering (ETL input only)
+
+When the input is an `.etl` file, per-packet Process IDs are extracted
+using the `etl-parser` library. Each handshake in the output is labeled
+with the PID of its ClientHello and ServerHello packets
+(e.g. `[CH-PID=13256, SH-PID=0]`).
+
+Use `--pid` to show only handshakes involving specific processes:
+
+```bash
+# Show only handshakes where PID 4080 sent the ClientHello or ServerHello
+python main.py data/ao.etl --mode=1 --pid=4080
+
+# Multiple PIDs
+python main.py data/ao.etl --mode=1 --pid=13256,4080
+```
+
+When `--pid` is omitted, all handshakes are shown (with PID labels).
 
 ### Modes
 
@@ -56,6 +76,9 @@ python main.py data/nspktdump.pcap --mode=1
 
 # ETL input (Windows only) — auto-converted to data/session.pcap
 python main.py data/session.etl --mode=1
+
+# ETL with PID filter — only show handshakes from PID 4080
+python main.py data/session.etl --mode=1 --pid=4080
 
 # Permissive mode — pass if server selects FIPS cipher
 python main.py data/nspktdump.pcap --mode=2
@@ -103,6 +126,7 @@ Example: `TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256`
 <img width="1101" height="954" alt="image" src="https://github.com/user-attachments/assets/39b8745c-d9b9-4845-9598-2b432bcc4aeb" />
 
 For each handshake the tool prints:
+- PID labels (when input is ETL): `[CH-PID=13256, SH-PID=0]`
 - ClientHello offered cipher suites tagged `[FIPS OK]` or `[NON-FIPS]`
 - ServerHello selected cipher suite with the same tagging
 - Per-handshake verdict: `PASS` or `FAIL`

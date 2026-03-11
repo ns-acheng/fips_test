@@ -1,1 +1,3 @@
 dpkt>=1.9.8
+etl-parser
+etl-parser
