@@ -16,6 +16,7 @@ Usage:
 """
 
 import argparse
+import json
 import os
 import struct
 import sys
@@ -38,65 +39,27 @@ def _yellow(s):
 # ---------------------------------------------------------------------------
 # FIPS 140-3 approved cipher suites (design doc §4.4.3)
 # ---------------------------------------------------------------------------
-FIPS_ALLOWED_CIPHERS = {
-    # TLS 1.2
-    0xC02F: "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256",
-    0xC030: "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384",
-    0xC02B: "TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256",
-    0xC02C: "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384",
-    0x009E: "TLS_DHE_RSA_WITH_AES_128_GCM_SHA256",
-    0x009F: "TLS_DHE_RSA_WITH_AES_256_GCM_SHA384",
-    # TLS 1.3
-    0x1301: "TLS_AES_128_GCM_SHA256",
-    0x1302: "TLS_AES_256_GCM_SHA384",
-}
+def _load_ciphers():
+    _path = os.path.join(os.path.dirname(__file__), "fips_ciphers.json")
+    with open(_path) as _f:
+        _data = json.load(_f)
+    _fips = {int(k, 16): v for k, v in _data["fips_allows"].items()}
+    _denied = {int(k, 16): v for k, v in _data["fips_denied"].items()}
+    _signaling = {int(k, 16) for k in _data["signaling_suites"]}
+    _grease = {int(k, 16) for k in _data["grease_values"]}
+    return _fips, _denied, _signaling, _grease
 
-# Explicitly banned even though it appears in TLS 1.3 spec — OpenSSL 3.1.2
-# FIPS provider does not include it.
-EXPLICITLY_BANNED = {
-    0x1303: "TLS_CHACHA20_POLY1305_SHA256",
-}
+FIPS_ALLOWED_CIPHERS, FIPS_DENIED_CIPHERS, SIGNALING_SUITES, GREASE_VALUES = (
+    _load_ciphers()
+)
 
-# Well-known cipher suite names for readable output (subset for common ones)
-KNOWN_CIPHERS = {
-    **FIPS_ALLOWED_CIPHERS,
-    **EXPLICITLY_BANNED,
-    0x002F: "TLS_RSA_WITH_AES_128_CBC_SHA",
-    0x0035: "TLS_RSA_WITH_AES_256_CBC_SHA",
-    0x003C: "TLS_RSA_WITH_AES_128_CBC_SHA256",
-    0x003D: "TLS_RSA_WITH_AES_256_CBC_SHA256",
-    0x009C: "TLS_RSA_WITH_AES_128_GCM_SHA256",
-    0x009D: "TLS_RSA_WITH_AES_256_GCM_SHA384",
-    0xC009: "TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA",
-    0xC00A: "TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA",
-    0xC013: "TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA",
-    0xC014: "TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA",
-    0xC023: "TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256",
-    0xC024: "TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA384",
-    0xC027: "TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256",
-    0xC028: "TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA384",
-    0xCCA8: "TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256",
-    0xCCA9: "TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256",
-    0xCCAA: "TLS_DHE_RSA_WITH_CHACHA20_POLY1305_SHA256",
-    0x0004: "TLS_RSA_WITH_RC4_128_MD5",
-    0x0005: "TLS_RSA_WITH_RC4_128_SHA",
-    0x000A: "TLS_RSA_WITH_3DES_EDE_CBC_SHA",
-    0x0033: "TLS_DHE_RSA_WITH_AES_128_CBC_SHA",
-    0x0039: "TLS_DHE_RSA_WITH_AES_256_CBC_SHA",
-    0x0067: "TLS_DHE_RSA_WITH_AES_128_CBC_SHA256",
-    0x006B: "TLS_DHE_RSA_WITH_AES_256_CBC_SHA256",
+SIGNALING_SUITE_NAMES = {
     0x00FF: "TLS_EMPTY_RENEGOTIATION_INFO_SCSV",
     0x5600: "TLS_FALLBACK_SCSV",
 }
 
 # Signaling cipher suite values (not real ciphers, skip in compliance check)
-SIGNALING_SUITES = {0x00FF, 0x5600}
-
 # GREASE values (RFC 8701) — dummy probes injected by clients, not real ciphers
-GREASE_VALUES = {
-    0x0A0A, 0x1A1A, 0x2A2A, 0x3A3A, 0x4A4A, 0x5A5A, 0x6A6A, 0x7A7A,
-    0x8A8A, 0x9A9A, 0xAAAA, 0xBABA, 0xCACA, 0xDADA, 0xEAEA, 0xFAFA,
-}
 
 TLS_VERSION_NAMES = {
     (3, 0): "SSL 3.0",
@@ -114,7 +77,13 @@ def cipher_name(code):
     """Return human-readable name for a cipher suite code."""
     if code in GREASE_VALUES:
         return f"GREASE_0x{code:04X}"
-    return KNOWN_CIPHERS.get(code, f"UNKNOWN_0x{code:04X}")
+    if code in FIPS_ALLOWED_CIPHERS:
+        return FIPS_ALLOWED_CIPHERS[code]
+    if code in FIPS_DENIED_CIPHERS:
+        return FIPS_DENIED_CIPHERS[code]
+    if code in SIGNALING_SUITE_NAMES:
+        return SIGNALING_SUITE_NAMES[code]
+    return f"UNKNOWN_0x{code:04X}"
 
 
 def is_fips_ok(code):
@@ -524,10 +493,6 @@ def check_and_report(results, strict=False):
             verdict = "FAIL"
             non_fips_stats[sel_code]["selected"] += 1
             issues.append(f"Selected cipher is NOT FIPS-approved: 0x{sel_code:04X} {cipher_name(sel_code)}")
-
-        if sel_code in EXPLICITLY_BANNED:
-            verdict = "FAIL"
-            issues.append(f"Explicitly banned cipher selected: {cipher_name(sel_code)}")
 
         # --- Client Hello checks ---
         ch_offered = []

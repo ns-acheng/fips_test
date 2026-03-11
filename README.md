@@ -72,6 +72,12 @@ python tools/check_fips_cipher.py data/nspktdump.pcap
 
 ## FIPS-Approved Cipher Suites
 
+Cipher suite naming format (TLS 1.2 style):
+
+`TLS_<KEY_EXCHANGE>_WITH_<BULK_CIPHER>_<MAC/HASH>`
+
+Example: `TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256`
+
 ### TLS 1.2
 
 | Code | Name |
