@@ -547,8 +547,7 @@ def check_and_report(results, strict=False, pid_filter=None):
         # ---- PID filter ----
         if pid_filter is not None:
             ch_pid = ch.get("pid") if ch else None
-            sh_pid = sh.get("pid") if sh else None
-            if ch_pid not in pid_filter and sh_pid not in pid_filter:
+            if ch_pid not in pid_filter:
                 continue
 
         verdict = "PASS"
@@ -611,16 +610,10 @@ def check_and_report(results, strict=False, pid_filter=None):
         ch = d["ch"]
         sni = ch.get("sni") if ch else None
         sni_str = f"  SNI: {sni}" if sni else ""
-        sh_pid = sh.get("pid")
         ch_pid = ch.get("pid") if ch else None
         pid_label = ""
-        if sh_pid is not None or ch_pid is not None:
-            parts = []
-            if ch_pid is not None:
-                parts.append(f"CH-PID={ch_pid}")
-            if sh_pid is not None:
-                parts.append(f"SH-PID={sh_pid}")
-            pid_label = f"  [{', '.join(parts)}]"
+        if ch_pid is not None:
+            pid_label = f"  [CH-PID={ch_pid}]"
         print(f"\n=== Handshake #{d['index']}  (pkt {sh['pkt_num']}, "
               f"{sh['src_ip']}:{sh['src_port']} -> {sh['dst_ip']}:{sh['dst_port']})"
               f"{pid_label} ===")
