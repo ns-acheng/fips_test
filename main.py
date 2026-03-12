@@ -98,6 +98,13 @@ def main():
             "Requires .etl input (PID info is extracted from the ETL)."
         ),
     )
+    parser.add_argument(
+        "--failonly",
+        type=int,
+        choices=[0, 1],
+        default=0,
+        help="1 = show only FAIL handshakes and skip the summary (default: 0)",
+    )
     args = parser.parse_args()
 
     resolved_capture = _resolve_input_capture_path(args.pcap)
@@ -142,7 +149,8 @@ def main():
         print("\nNo TLS handshakes (ClientHello/ServerHello pairs) found.")
         sys.exit(0)
 
-    rc = check_and_report(results, strict=strict, pid_filter=pid_filter)
+    rc = check_and_report(results, strict=strict, pid_filter=pid_filter,
+                          fail_only=bool(args.failonly))
     sys.exit(rc)
 
 

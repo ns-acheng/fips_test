@@ -27,6 +27,7 @@ python main.py <pcap_file> --mode=<0|1|2>
 | `pcap_file` | Path to capture file (`.pcap`, `.pcapng`, or `.etl`) |
 | `--mode` | FipsMode (default: `1`) |
 | `--pid` | Comma-separated list of PIDs to filter (ETL input only) |
+| `--failonly` | `1` = show only FAIL handshakes and skip the summary (default: `0`) |
 
 ### ETL Input (Windows only)
 
@@ -85,6 +86,9 @@ python main.py data/nspktdump.pcap --mode=2
 
 # Non-FIPS mode — skip check
 python main.py data/nspktdump.pcap --mode=0
+
+# Show only failed handshakes (no summary)
+python main.py data/nspktdump.pcap --mode=1 --failonly=1
 ```
 
 You can also run the checker module directly:

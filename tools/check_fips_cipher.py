@@ -525,7 +525,7 @@ def process_pcap(filepath, pid_map=None):
 # FIPS compliance check + report
 # ---------------------------------------------------------------------------
 
-def check_and_report(results, strict=False, pid_filter=None):
+def check_and_report(results, strict=False, pid_filter=None, fail_only=False):
     """
     Analyze each handshake for FIPS compliance and print report.
     Returns 0 if all pass, 1 if any fail.
@@ -533,6 +533,9 @@ def check_and_report(results, strict=False, pid_filter=None):
     If *pid_filter* is given (set of ints), only handshakes whose
     ClientHello **or** ServerHello was sent by one of those PIDs
     are included in the report.
+
+    If *fail_only* is True, only FAIL handshakes are printed and
+    the summary section is omitted.
     """
     passed = 0
     failed = 0
@@ -606,6 +609,8 @@ def check_and_report(results, strict=False, pid_filter=None):
 
     # --- Print detailed report ---
     for d in handshake_details:
+        if fail_only and d["verdict"] == "PASS":
+            continue
         sh = d["sh"]
         ch = d["ch"]
         sni = ch.get("sni") if ch else None
@@ -653,23 +658,24 @@ def check_and_report(results, strict=False, pid_filter=None):
         print(f"  Result: {verdict_str}")
 
     # --- Summary ---
-    print("\n" + "=" * 60)
-    print("SUMMARY")
-    print("=" * 60)
-    print(f"Total handshakes analyzed: {passed + failed}")
-    print(f"  {_green('PASS')}: {passed}")
-    print(f"  {_red('FAIL')}: {failed}")
-    if warnings:
-        print(f"  Warnings (non-FIPS offered in ClientHello): {warnings}")
+    if not fail_only:
+        print("\n" + "=" * 60)
+        print("SUMMARY")
+        print("=" * 60)
+        print(f"Total handshakes analyzed: {passed + failed}")
+        print(f"  {_green('PASS')}: {passed}")
+        print(f"  {_red('FAIL')}: {failed}")
+        if warnings:
+            print(f"  Warnings (non-FIPS offered in ClientHello): {warnings}")
 
-    if non_fips_stats:
-        print("\nNon-FIPS cipher suites seen:")
-        for code, counts in sorted(non_fips_stats.items()):
-            print(f"  0x{code:04X}  {cipher_name(code):50s}  "
-                  f"offered={counts['offered']}  selected={counts['selected']}")
+        if non_fips_stats:
+            print("\nNon-FIPS cipher suites seen:")
+            for code, counts in sorted(non_fips_stats.items()):
+                print(f"  0x{code:04X}  {cipher_name(code):50s}  "
+                      f"offered={counts['offered']}  selected={counts['selected']}")
 
-    overall = _green("PASS") if failed == 0 else _red("FAIL")
-    print(f"\nOverall: {overall}")
+        overall = _green("PASS") if failed == 0 else _red("FAIL")
+        print(f"\nOverall: {overall}")
     return 0 if failed == 0 else 1
 
 
