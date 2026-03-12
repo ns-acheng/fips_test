@@ -562,6 +562,10 @@ def _process_packet(pkt_data, link_type, pkt_num, client_hellos, results,
             ch["protocol"] = protocol
             if pid_map:
                 ch["pid"] = pid_map.get(pkt_num)
+            # Save displaced ClientHello (e.g. DTLS cookie exchange retransmit)
+            prev = client_hellos.get(flow_key)
+            if prev is not None:
+                results.append({"client_hello": prev, "server_hello": None})
             client_hellos[flow_key] = ch
 
     elif hs_type == 2:  # ServerHello
