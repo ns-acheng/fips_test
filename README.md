@@ -108,4 +108,4 @@ Example: `TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256`
 
 ## Output
 
-<img width="1101" height="954" alt="image" src="https://github.com/user-attachments/assets/39b8745c-d9b9-4845-9598-2b432bcc4aeb" />
+<img width="1311" height="1008" alt="image" src="https://github.com/user-attachments/assets/682884ac-e6de-4cc3-ad2f-f2234ec4a28c" />
