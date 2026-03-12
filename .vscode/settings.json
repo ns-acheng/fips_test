@@ -44,6 +44,10 @@
             "approve": true,
             "matchCommandLine": true
         },
-        "&": true
+        "&": true,
+        "/^python \\.\\\\main\\.py \\.\\\\data\\\\5\\.etl --pid=12400,7936,720 --mode=1$/": {
+            "approve": true,
+            "matchCommandLine": true
+        }
     }
 }

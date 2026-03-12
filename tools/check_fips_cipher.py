@@ -73,6 +73,20 @@ TLS_VERSION_NAMES = {
 # TLS versions that are FIPS-acceptable
 FIPS_ALLOWED_VERSIONS = {(3, 3), (3, 4)}  # TLS 1.2, TLS 1.3
 
+# DTLS version wire values and their display names
+DTLS_VERSION_NAMES = {
+    (254, 255): "DTLS 1.0",
+    (254, 253): "DTLS 1.2",
+    (254, 252): "DTLS 1.3",
+}
+
+# Map DTLS wire versions to equivalent TLS versions for FIPS checking
+DTLS_TO_TLS_VERSION = {
+    (254, 255): (3, 2),  # DTLS 1.0 -> TLS 1.1
+    (254, 253): (3, 3),  # DTLS 1.2 -> TLS 1.2
+    (254, 252): (3, 4),  # DTLS 1.3 -> TLS 1.3
+}
+
 
 def cipher_name(code):
     """Return human-readable name for a cipher suite code."""
@@ -95,6 +109,14 @@ def is_fips_ok(code):
 def is_signaling(code):
     """Check if a cipher suite code is a signaling/GREASE value (not a real cipher)."""
     return code in SIGNALING_SUITES or code in GREASE_VALUES
+
+
+def _version_name(ver, protocol=None):
+    """Return display name for a version tuple, using DTLS names when appropriate."""
+    if protocol == "DTLS":
+        _tls_to_dtls = {(3, 2): "DTLS 1.0", (3, 3): "DTLS 1.2", (3, 4): "DTLS 1.3"}
+        return _tls_to_dtls.get(ver, f"DTLS Unknown({ver[0]}.{ver[1]})")
+    return TLS_VERSION_NAMES.get(ver, f"Unknown({ver[0]}.{ver[1]})")
 
 
 # ---------------------------------------------------------------------------
@@ -287,6 +309,151 @@ def parse_server_hello(payload):
 
 
 # ---------------------------------------------------------------------------
+# DTLS ClientHello / ServerHello parsing
+# ---------------------------------------------------------------------------
+
+def parse_dtls_client_hello(payload):
+    """
+    Parse a DTLS ClientHello from the handshake payload.
+    DTLS handshake header is 12 bytes (vs TLS 4 bytes) and the body
+    includes a cookie field between session_id and cipher_suites.
+    Returns dict with 'version', 'cipher_suites' list, or None on failure.
+    """
+    # DTLS handshake header: type(1) + length(3) + msg_seq(2) + frag_off(3) + frag_len(3) = 12
+    if len(payload) < 47:  # 12 header + 2 version + 32 random + 1 sid_len
+        return None
+    hs_type = payload[0]
+    if hs_type != 1:
+        return None
+
+    ver = (payload[12], payload[13])
+    offset = 14 + 32  # skip version(2) + random(32)
+
+    # session_id
+    if offset >= len(payload):
+        return None
+    sid_len = payload[offset]
+    offset += 1 + sid_len
+
+    # cookie (DTLS-specific)
+    if offset >= len(payload):
+        return None
+    cookie_len = payload[offset]
+    offset += 1 + cookie_len
+
+    # cipher_suites
+    if offset + 2 > len(payload):
+        return None
+    cs_len = struct.unpack("!H", payload[offset:offset + 2])[0]
+    offset += 2
+    if offset + cs_len > len(payload):
+        return None
+
+    suites = []
+    for i in range(0, cs_len, 2):
+        code = struct.unpack("!H", payload[offset + i:offset + i + 2])[0]
+        suites.append(code)
+
+    # Map DTLS version to TLS equivalent
+    tls_ver = DTLS_TO_TLS_VERSION.get(ver, ver)
+    actual_ver = tls_ver
+    sni = None
+    ext_offset = offset + cs_len
+    # skip compression methods
+    if ext_offset < len(payload):
+        comp_len = payload[ext_offset]
+        ext_offset += 1 + comp_len
+    # extensions
+    plen = len(payload)
+    if ext_offset + 2 <= plen:
+        ext_total = struct.unpack("!H", payload[ext_offset:ext_offset + 2])[0]
+        ext_offset += 2
+        ext_end = min(ext_offset + ext_total, plen)
+        while ext_offset + 4 <= ext_end:
+            ext_type = struct.unpack("!H", payload[ext_offset:ext_offset + 2])[0]
+            ext_len = struct.unpack("!H", payload[ext_offset + 2:ext_offset + 4])[0]
+            ext_offset += 4
+            if ext_offset + ext_len > ext_end:
+                break
+            if ext_type == 0 and ext_len >= 5:  # server_name (SNI)
+                sni_list_len = struct.unpack("!H", payload[ext_offset:ext_offset + 2])[0]
+                sni_off = ext_offset + 2
+                sni_end = min(ext_offset + sni_list_len + 2, ext_offset + ext_len)
+                while sni_off + 3 <= sni_end:
+                    name_type = payload[sni_off]
+                    name_len = struct.unpack("!H", payload[sni_off + 1:sni_off + 3])[0]
+                    sni_off += 3
+                    if name_type == 0 and sni_off + name_len <= sni_end:
+                        sni = payload[sni_off:sni_off + name_len].decode("ascii", errors="replace")
+                    sni_off += name_len
+            if ext_type == 43 and ext_len >= 3:  # supported_versions
+                sv_list_len = payload[ext_offset]
+                for j in range(0, min(sv_list_len, ext_len - 1), 2):
+                    if ext_offset + 2 + j >= plen:
+                        break
+                    sv = (payload[ext_offset + 1 + j], payload[ext_offset + 2 + j])
+                    if sv == (254, 252) or sv == (3, 4):  # DTLS 1.3 or TLS 1.3
+                        actual_ver = (3, 4)
+                        break
+            ext_offset += ext_len
+
+    return {"version": actual_ver, "cipher_suites": suites, "sni": sni}
+
+
+def parse_dtls_server_hello(payload):
+    """
+    Parse a DTLS ServerHello from the handshake payload.
+    DTLS handshake header is 12 bytes (vs TLS 4 bytes).
+    Returns dict with 'version', 'cipher_suite', or None on failure.
+    """
+    if len(payload) < 47:  # 12 header + 2 version + 32 random + 1 sid_len
+        return None
+    hs_type = payload[0]
+    if hs_type != 2:
+        return None
+
+    ver = (payload[12], payload[13])
+    offset = 14 + 32  # skip version(2) + random(32)
+
+    # session_id
+    if offset >= len(payload):
+        return None
+    sid_len = payload[offset]
+    offset += 1 + sid_len
+
+    # selected cipher suite
+    if offset + 2 > len(payload):
+        return None
+    suite = struct.unpack("!H", payload[offset:offset + 2])[0]
+    offset += 2
+
+    # Map DTLS version to TLS equivalent
+    tls_ver = DTLS_TO_TLS_VERSION.get(ver, ver)
+    actual_ver = tls_ver
+    # skip compression method (1 byte)
+    offset += 1
+    # extensions
+    plen = len(payload)
+    if offset + 2 <= plen:
+        ext_total = struct.unpack("!H", payload[offset:offset + 2])[0]
+        offset += 2
+        ext_end = min(offset + ext_total, plen)
+        while offset + 4 <= ext_end:
+            ext_type = struct.unpack("!H", payload[offset:offset + 2])[0]
+            ext_len = struct.unpack("!H", payload[offset + 2:offset + 4])[0]
+            offset += 4
+            if offset + ext_len > ext_end:
+                break
+            if ext_type == 43 and ext_len >= 2:  # supported_versions
+                sv = (payload[offset], payload[offset + 1])
+                if sv == (254, 252) or sv == (3, 4):  # DTLS 1.3 or TLS 1.3
+                    actual_ver = (3, 4)
+            offset += ext_len
+
+    return {"version": actual_ver, "cipher_suite": suite}
+
+
+# ---------------------------------------------------------------------------
 # pcap processing
 # ---------------------------------------------------------------------------
 
@@ -338,51 +505,77 @@ def _process_packet(pkt_data, link_type, pkt_num, client_hellos, results,
     else:
         return
 
-    if proto != 6:  # TCP
+    if proto == 6:  # TCP
+        if len(ip_payload) < 20:
+            return
+        src_port = struct.unpack("!H", ip_payload[0:2])[0]
+        dst_port = struct.unpack("!H", ip_payload[2:4])[0]
+        tcp_data_off = ((ip_payload[12] >> 4) * 4)
+        record_payload = ip_payload[tcp_data_off:]
+        is_dtls = False
+    elif proto == 17:  # UDP
+        if len(ip_payload) < 8:
+            return
+        src_port = struct.unpack("!H", ip_payload[0:2])[0]
+        dst_port = struct.unpack("!H", ip_payload[2:4])[0]
+        record_payload = ip_payload[8:]  # UDP header is 8 bytes
+        is_dtls = True
+    else:
         return
 
-    if len(ip_payload) < 20:
-        return
-    src_port = struct.unpack("!H", ip_payload[0:2])[0]
-    dst_port = struct.unpack("!H", ip_payload[2:4])[0]
-    tcp_data_off = ((ip_payload[12] >> 4) * 4)
-    tcp_payload = ip_payload[tcp_data_off:]
+    if is_dtls:
+        # DTLS record: content_type(1) + version(2) + epoch(2) + seq(6) + length(2) = 13
+        if len(record_payload) < 14:
+            return
+        content_type = record_payload[0]
+        if content_type != 22:  # Handshake
+            return
+        hs_payload = record_payload[13:]
+    else:
+        # TLS record: content_type(1) + version(2) + length(2) = 5
+        if len(record_payload) < 6:
+            return
+        content_type = record_payload[0]
+        if content_type != 22:  # Handshake
+            return
+        hs_payload = record_payload[5:]
 
-    if len(tcp_payload) < 6:
-        return
-
-    # --- TLS record layer ---
-    content_type = tcp_payload[0]
-    if content_type != 22:  # Handshake
-        return
-    hs_payload = tcp_payload[5:]
     if len(hs_payload) < 4:
         return
 
     hs_type = hs_payload[0]
     flow_key = (src_ip, src_port, dst_ip, dst_port)
     rev_key = (dst_ip, dst_port, src_ip, src_port)
+    protocol = "DTLS" if is_dtls else "TLS"
 
     if hs_type == 1:  # ClientHello
-        ch = parse_client_hello(hs_payload)
+        if is_dtls:
+            ch = parse_dtls_client_hello(hs_payload)
+        else:
+            ch = parse_client_hello(hs_payload)
         if ch:
             ch["pkt_num"] = pkt_num
             ch["src_ip"] = src_ip
             ch["src_port"] = src_port
             ch["dst_ip"] = dst_ip
             ch["dst_port"] = dst_port
+            ch["protocol"] = protocol
             if pid_map:
                 ch["pid"] = pid_map.get(pkt_num)
             client_hellos[flow_key] = ch
 
     elif hs_type == 2:  # ServerHello
-        sh = parse_server_hello(hs_payload)
+        if is_dtls:
+            sh = parse_dtls_server_hello(hs_payload)
+        else:
+            sh = parse_server_hello(hs_payload)
         if sh:
             sh["pkt_num"] = pkt_num
             sh["src_ip"] = src_ip
             sh["src_port"] = src_port
             sh["dst_ip"] = dst_ip
             sh["dst_port"] = dst_port
+            sh["protocol"] = protocol
             if pid_map:
                 sh["pid"] = pid_map.get(pkt_num)
             ch = client_hellos.get(rev_key)
@@ -572,12 +765,13 @@ def check_and_report(results, strict=False, pid_filter=None, fail_only=False):
         sel_code = None
         if sh:
             sh_ver = sh["version"]
-            sh_ver_name = TLS_VERSION_NAMES.get(sh_ver, f"Unknown({sh_ver[0]}.{sh_ver[1]})")
+            sh_proto = sh.get("protocol")
+            sh_ver_name = _version_name(sh_ver, sh_proto)
             sel_code = sh["cipher_suite"]
 
             if sh_ver not in FIPS_ALLOWED_VERSIONS:
                 verdict = "FAIL"
-                issues.append(f"Non-FIPS TLS version: {sh_ver_name}")
+                issues.append(f"Non-FIPS version: {sh_ver_name}")
 
             if not is_fips_ok(sel_code) and not is_signaling(sel_code):
                 verdict = "FAIL"
@@ -633,7 +827,8 @@ def check_and_report(results, strict=False, pid_filter=None, fail_only=False):
         if ch_pid is not None:
             pid_label = f"  [CH-PID={ch_pid}]"
         pkt_ref = sh['pkt_num'] if sh else (ch['pkt_num'] if ch else '?')
-        label = "Handshake" if sh else "ClientHello-only"
+        hs_proto = (sh or ch or {}).get("protocol", "TLS")
+        label = f"{hs_proto} Handshake" if sh else f"{hs_proto} ClientHello-only"
         print(f"\n======= {label} #{d['index']}  "
               f"(pkt {pkt_ref}){pid_label} ===============")
         if sni:
@@ -643,8 +838,8 @@ def check_and_report(results, strict=False, pid_filter=None, fail_only=False):
         if ch:
             print(f"  ClientHello (pkt {ch['pkt_num']}, "
                   f"{ch['src_ip']}:{ch['src_port']} -> {ch['dst_ip']}:{ch['dst_port']})")
-            ch_ver_name = TLS_VERSION_NAMES.get(ch["version"],
-                                                 f"Unknown({ch['version'][0]}.{ch['version'][1]})")
+            ch_proto = ch.get("protocol")
+            ch_ver_name = _version_name(ch["version"], ch_proto)
             print(f"    Version: {ch_ver_name}")
             print(f"    Offered cipher suites ({len(d['ch_offered'])}):")
             for code in d["ch_offered"]:

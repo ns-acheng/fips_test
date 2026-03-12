@@ -14,6 +14,7 @@ Modes:
 """
 
 import argparse
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -113,14 +114,28 @@ def main():
     pid_map = {}
     pid_filter = None
     etl_path = Path(args.pcap)
+    resolved_path = Path(resolved_capture)
+    pid_json_path = resolved_path.parent / f"{resolved_path.stem}.pid.json"
+
     if etl_path.suffix.lower() == ".etl" and etl_path.exists():
         print(f"Extracting per-packet PIDs from ETL: {etl_path}")
         pid_map = extract_pids_from_etl(str(etl_path))
         print(f"  PID map: {len(pid_map)} packets mapped")
+        # Save PID map so it can be reused with the .pcap later
+        if pid_map:
+            with open(pid_json_path, "w") as f:
+                json.dump({str(k): v for k, v in pid_map.items()}, f)
+            print(f"  PID map saved to {pid_json_path}")
+    elif args.pid and pid_json_path.exists():
+        # Load previously saved PID map for this pcap
+        with open(pid_json_path) as f:
+            raw = json.load(f)
+        pid_map = {int(k): v for k, v in raw.items()}
+        print(f"Loaded PID map from {pid_json_path} ({len(pid_map)} packets)")
     elif args.pid:
         print(
-            "WARNING: --pid filter requested but input is not .etl; "
-            "PID information is unavailable.",
+            "WARNING: --pid filter requested but no PID data available. "
+            f"Run the matching .etl first to generate {pid_json_path}.",
             file=sys.stderr,
         )
 
