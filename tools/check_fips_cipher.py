@@ -518,6 +518,17 @@ def process_pcap(filepath, pid_map=None):
         _process_packet(pkt_bytes, link_type, pkt_num, client_hellos, results,
                         pid_map=pid_map)
 
+    # Include unpaired ClientHellos (no matching ServerHello)
+    paired_keys = set()
+    for r in results:
+        ch = r["client_hello"]
+        if ch:
+            paired_keys.add((ch["src_ip"], ch["src_port"],
+                             ch["dst_ip"], ch["dst_port"]))
+    for key, ch in client_hellos.items():
+        if key not in paired_keys:
+            results.append({"client_hello": ch, "server_hello": None})
+
     return results
 
 
@@ -557,18 +568,21 @@ def check_and_report(results, strict=False, pid_filter=None, fail_only=False):
         issues = []
 
         # --- Server Hello checks ---
-        sh_ver = sh["version"]
-        sh_ver_name = TLS_VERSION_NAMES.get(sh_ver, f"Unknown({sh_ver[0]}.{sh_ver[1]})")
-        sel_code = sh["cipher_suite"]
+        sh_ver_name = None
+        sel_code = None
+        if sh:
+            sh_ver = sh["version"]
+            sh_ver_name = TLS_VERSION_NAMES.get(sh_ver, f"Unknown({sh_ver[0]}.{sh_ver[1]})")
+            sel_code = sh["cipher_suite"]
 
-        if sh_ver not in FIPS_ALLOWED_VERSIONS:
-            verdict = "FAIL"
-            issues.append(f"Non-FIPS TLS version: {sh_ver_name}")
+            if sh_ver not in FIPS_ALLOWED_VERSIONS:
+                verdict = "FAIL"
+                issues.append(f"Non-FIPS TLS version: {sh_ver_name}")
 
-        if not is_fips_ok(sel_code) and not is_signaling(sel_code):
-            verdict = "FAIL"
-            non_fips_stats[sel_code]["selected"] += 1
-            issues.append(f"Selected cipher is NOT FIPS-approved: 0x{sel_code:04X} {cipher_name(sel_code)}")
+            if not is_fips_ok(sel_code) and not is_signaling(sel_code):
+                verdict = "FAIL"
+                non_fips_stats[sel_code]["selected"] += 1
+                issues.append(f"Selected cipher is NOT FIPS-approved: 0x{sel_code:04X} {cipher_name(sel_code)}")
 
         # --- Client Hello checks ---
         ch_offered = []
@@ -614,13 +628,14 @@ def check_and_report(results, strict=False, pid_filter=None, fail_only=False):
         sh = d["sh"]
         ch = d["ch"]
         sni = ch.get("sni") if ch else None
-        sni_str = f"  SNI: {sni}" if sni else ""
         ch_pid = ch.get("pid") if ch else None
         pid_label = ""
         if ch_pid is not None:
             pid_label = f"  [CH-PID={ch_pid}]"
-        print(f"\n======= Handshake #{d['index']}  "
-              f"(pkt {sh['pkt_num']}){pid_label} ===============")
+        pkt_ref = sh['pkt_num'] if sh else (ch['pkt_num'] if ch else '?')
+        label = "Handshake" if sh else "ClientHello-only"
+        print(f"\n======= {label} #{d['index']}  "
+              f"(pkt {pkt_ref}){pid_label} ===============")
         if sni:
             print(f"  SNI: {_yellow(sni)}")
 
@@ -645,9 +660,12 @@ def check_and_report(results, strict=False, pid_filter=None, fail_only=False):
 
         # ServerHello
         sel = d["sel_code"]
-        tag = _green("[FIPS OK] ") if is_fips_ok(sel) else _red("[NON-FIPS]")
-        print(f"  ServerHello selected suite:")
-        print(f"      {tag}  0x{sel:04X}  {cipher_name(sel)}")
+        if sel is not None:
+            tag = _green("[FIPS OK] ") if is_fips_ok(sel) else _red("[NON-FIPS]")
+            print(f"  ServerHello selected suite:")
+            print(f"      {tag}  0x{sel:04X}  {cipher_name(sel)}")
+        else:
+            print(f"  ServerHello: (not captured)")
 
         # Verdict
         if d["issues"]:

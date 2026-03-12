@@ -146,7 +146,7 @@ def main():
 
     results = process_pcap(resolved_capture, pid_map=pid_map or None)
     if not results:
-        print("\nNo TLS handshakes (ClientHello/ServerHello pairs) found.")
+        print("\nNo TLS handshakes or ClientHello messages found.")
         sys.exit(0)
 
     rc = check_and_report(results, strict=strict, pid_filter=pid_filter,

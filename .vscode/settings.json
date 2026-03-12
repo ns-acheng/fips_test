@@ -43,6 +43,7 @@
         "/^Get-WinEvent -Path data/ao\\.etl -Oldest -MaxEvents 5000 \\| Group-Object ProviderId \\| Select-Object Name, Count \\| Sort-Object Count -Descending$/": {
             "approve": true,
             "matchCommandLine": true
-        }
+        },
+        "&": true
     }
 }
